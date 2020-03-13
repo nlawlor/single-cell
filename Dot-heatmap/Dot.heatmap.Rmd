@@ -1,0 +1,137 @@
+---
+title: "Visualization of scRNA-seq data with a dot-heatmap"
+author: "Nathan Lawlor"
+date: "3/13/2020"
+output: 
+    html_document:
+      keep_md: true
+      toc: true
+      toc_float: true
+      fig_width: 10 
+      fig_height: 10 
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a vignette for visualizing single cell RNA-seq data in a dot plot format with additional dendrograms added to show the ordering/clustering of cells and features. The figure produced is similar to a heatmap, but it uses a dot plot instead to show the average expression levels of features and also the proportion of cells that express each feature.
+
+## Load libraries and data
+```{r load, eval=TRUE}
+suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages(library(ggdendro))
+suppressPackageStartupMessages(library(viridis))
+suppressPackageStartupMessages(library(grid))
+suppressPackageStartupMessages(library(reshape2))
+suppressPackageStartupMessages(library(cowplot))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(tidyr))
+suppressPackageStartupMessages(library(egg))
+
+# load in test data
+df <- readRDS("Test.scRNAseq.data.for.dotplot.Rds")
+df <- df[, c("features.plot", "id", "avg.exp.scaled", "pct.exp")]
+head(df)
+# data frame of genes, cell type identity, avg exp for each cell type, and % of cells expressing the gene
+
+```
+
+## Clustering and creating ggdendrograms
+
+```{r dendrograms, eval=TRUE}
+# transform data frame from long to wide format and cluster for dendrograms
+exp_df <- df[,c("features.plot", "id", "avg.exp.scaled")]
+exp_mat <- tidyr::spread(exp_df, key = id, avg.exp.scaled)
+# change rownames of dataframe to features, and remove the extra column
+rownames(exp_mat) <- exp_mat$features.plot
+exp_mat[,1] <- NULL
+# examine format of the wide format data frame
+exp_mat[1:4, 1:4]
+
+# clustering of cells (columns of data frame)
+dendro <- as.dendrogram(hclust(d = dist(t(x = exp_mat))))
+dendro.plot <- ggdendrogram(data = dendro, rotate = TRUE)
+dendro.plot.no.labs <- ggdendrogram(data = dendro, rotate = TRUE, labels = F)
+plot(dendro.plot)
+
+# clustering of features (rows of data frame)
+gene.dendro <- as.dendrogram(hclust(d = dist(x = exp_mat)))
+gene.dendro.plot <- ggdendrogram(data = gene.dendro, rotate = FALSE)
+gene.dendro.plot.nolabs <- ggdendrogram(data = gene.dendro, rotate = FALSE, labels = F)
+plot(gene.dendro.plot)
+
+
+cluster_labs <- labels(dendro)
+gene_labs <- labels(gene.dendro)
+# re-order levels in initial data frame to be used for the dotplot later on
+df$features.plot <- factor(df$features.plot,levels=gene_labs)
+df$id <- factor(df$id,levels=cluster_labs)
+
+```
+
+## Dotplot of features and cells
+```{r dotplot, eval=TRUE}
+# create a dot plot of the avg scaled expression of each feature per cell type; size of dots reflect % of feature detection in a cell
+gp_genes <- ggplot(df, aes(x = features.plot, y = id)) + 
+  geom_point(data = df, aes(size = pct.exp, color = avg.exp.scaled)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_color_viridis() +
+  labs(x = "Genes", y = "Cluster Identity", title = "") + 
+  scale_fill_continuous(guide = guide_legend()) +
+  theme(legend.position="bottom")
+gp_genes
+
+# also create a ggplot without the legends (to be used later when combining the dendrograms and dotplot images together)
+gp_genes_no_legend <- ggplot(df, aes(x = features.plot, y = id)) + 
+  geom_point(data = df, aes(size = pct.exp, color = avg.exp.scaled)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 12)) + 
+  scale_color_viridis() +
+  labs(x = "Genes", y = "Cluster Identity", title = "") + 
+  scale_fill_continuous(guide = guide_legend()) +
+  theme(legend.position = "none")
+
+```
+
+## Visualization of dotplot and dendrograms (manual trial and error needed)
+```{r dotplot_manual, eval=TRUE}
+# visualize using manual adjustment for coordinates (must change the x/y, width/height parameters in the viewport argument)
+grid.newpage()
+print(gp_genes, vp = viewport(x = 0.45, y = 0.4, width = 0.8, height = 0.75))
+print(dendro.plot, vp = viewport(x = 0.90, y = 0.46, width = 0.1, height = 0.52))
+print(gene.dendro.plot, vp = viewport(x = 0.48, y = 0.87, width = 0.78, height = 0.25))
+
+```
+
+## Visualization of dotplot and dendrograms (no manual adjustment, but plots are not perfectly aligned)
+```{r dotplot_auto, eval=TRUE}
+# visualize roughly using grid/Grob objects (note that the alignment of plots won't be perfect)
+gA <- ggplotGrob(gp_genes_no_legend)
+gB <- ggplotGrob(gene.dendro.plot)
+gC <- ggplotGrob(dendro.plot)
+# empty plot to be used for blank space in final image
+gD <- ggplotGrob(ggplot(mtcars, aes(x = wt, y = mpg)) + theme_void())
+
+# get legend of feature dotplot
+legend <- cowplot::get_legend(gp_genes)
+
+# plot the dotplot and ggdendrograms together 
+grid.arrange(
+  grobs = list(gB, gD, gA, gC, legend, gD),
+  widths = c(4, 1),
+  heights = c(0.5, 2, 0.25),
+  layout_matrix = rbind(c(1, 2),
+                        c(3, 4),
+                        c(5, 6)),
+  nrow = 3
+)
+
+
+```
+
+## Session Information
+```{r session, eval=TRUE}
+sessionInfo()
+```
+
